@@ -1,0 +1,11 @@
+{
+  "private": true,
+  "scripts": {
+    "serve": "PORT=8070 marp -s .",
+    "html": "marp mcp2.md -o dist/mcp2.html",
+    "pdf": "marp mcp2.md --pdf --allow-local-files -o dist/mcp2.pdf"
+  },
+  "devDependencies": {
+    "@marp-team/marp-cli": "4.5.1"
+  }
+}
