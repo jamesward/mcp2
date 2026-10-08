@@ -1,0 +1,55 @@
+# Publishes the slides in preso to GitHub Pages: https://jamesward.github.io/mcp2/
+name: Slides
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'preso/**'
+      - '.github/scripts/preso_gen.sh'
+      - '.github/workflows/preso.yaml'
+  workflow_dispatch:
+
+# one deploy at a time; a newer push replaces a queued one
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: preso/package-lock.json
+
+      - run: npm ci
+        working-directory: preso
+
+      # the runner's Chrome renders the PDF
+      - run: ./.github/scripts/preso_gen.sh
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

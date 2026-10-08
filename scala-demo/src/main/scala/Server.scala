@@ -23,6 +23,9 @@ object Tools:
     "required"   -> Json.Arr(Json.Str("confirm")),
   )
 
+  private def confirmed(answer: ElicitationResult): Boolean =
+    answer.action == "accept" && answer.content.flatMap(_.get("confirm")).contains(Json.Bool(true))
+
   /**
    * Elicitation, the 2026-07-28 way: MRTR (Multi Round-Trip Request).
    * The handler just asks. On a modern request the server answers
@@ -34,22 +37,40 @@ object Tools:
     .description("Books a flight to a destination after the user confirms")
     .handleWithContext[Any, ToolError, FlightInput, String]: (in, ctx) =>
       ctx.elicit("confirm", s"Book a flight to ${in.destination} for $$420?", confirmSchema).map: answer =>
-        val confirmed = answer.action == "accept" &&
-          answer.content.flatMap(_.get("confirm")).contains(Json.Bool(true))
-        if confirmed then s"Booked: flight to ${in.destination}, confirmation MCP-2026"
+        if confirmed(answer) then s"Booked: flight to ${in.destination}, confirmation MCP-2026"
         else s"Not booked (${answer.action})"
 
   /**
-   * Long-running work. Called normally it just takes a while.
-   * Called with the Tasks extension marker in _meta, the server returns a task handle
-   * (resultType: "task") right away and the client polls tasks/get.
+   * Long-running work, as a Tasks-extension task (io.modelcontextprotocol/tasks).
+   * Task creation is server-directed: a client that declares the extension gets
+   *   resultType: "task" + taskId
+   * at once and polls tasks/get; ctx.progress shows up as the task's statusMessage.
+   * A client that does not declare it gets the same result synchronously.
    */
   val deepResearch = McpTool("deep_research")
-    .description("Researches a travel topic. Slow: prefer calling this as a task.")
+    .description("Researches a travel topic. Slow, so it runs as a task.")
+    .taskExecution(TaskExecution.WhenSupported, pollInterval = 500.millis)
     .handleWithContext[Any, ToolError, ResearchInput, String]: (in, ctx) =>
       ZIO.foreachDiscard(1 to 5): step =>
         ctx.progress(step, 5, Some(s"researching ${in.topic} ($step/5)")) *> ZIO.sleep(1.second)
       .as(s"Research on ${in.topic}: go in spring, book 6 weeks out, the train beats a taxi.")
+
+  /**
+   * A task that needs input midway: the elicitation moves the task to input_required
+   * with the request in inputRequests; the client answers with tasks/update and the
+   * same handler (not a replay) carries on.
+   */
+  val planTrip = McpTool("plan_trip")
+    .description("Plans a trip, checking with the user before booking. Runs as a task.")
+    .taskExecution(TaskExecution.Required, pollInterval = 500.millis)
+    .handleWithContext[Any, ToolError, FlightInput, String]: (in, ctx) =>
+      for
+        _      <- ctx.progress(1, 3, Some(s"finding flights to ${in.destination}")) *> ZIO.sleep(1.second)
+        answer <- ctx.elicit("confirm", s"Found a $$420 flight to ${in.destination}. Book it?", confirmSchema)
+        _      <- ctx.progress(3, 3, Some("booking")) *> ZIO.sleep(1.second)
+      yield
+        if confirmed(answer) then s"Trip to ${in.destination} planned and booked, confirmation MCP-2026"
+        else s"Trip to ${in.destination} planned, not booked (${answer.action})"
 
 object Main extends ZIOAppDefault:
 
@@ -58,12 +79,17 @@ object Main extends ZIOAppDefault:
     for
       skills <- McpSkillsJars.load // META-INF/skills/** from our resources + SkillsJars deps
       _      <- ZIO.foreachDiscard(skills.entries)(e => Console.printLine(s"skill: ${e.uri.value}"))
+      // io.modelcontextprotocol/tasks: off unless registered. McpTasks.inMemory keeps
+      // tasks in a Ref; McpTasks(store) takes your own McpTaskStore (Redis, a database...).
+      tasks  <- McpTasks.inMemory
+      exts   <- ZIO.fromEither(skills.extensions ++ tasks).orDieWith(e => RuntimeException(e.toString))
       server  = McpServer("mcp2-zio-server", "1.0.0")
                   .instructions("Travel helper. Read the flight-booking skill before booking.")
                   .tool(Tools.add)
                   .tool(Tools.bookFlight)
                   .tool(Tools.deepResearch)
-                  .withExtensions(skills.extensions) // io.modelcontextprotocol/skills
+                  .tool(Tools.planTrip)
+                  .withExtensions(exts) // io.modelcontextprotocol/skills + io.modelcontextprotocol/tasks
                   .resourceSource(skills.resources)
       _      <- Console.printLine(s"MCP server (2025-11-25 + 2026-07-28) on http://localhost:$port/mcp")
       // server.routes is dual-era: initialize -> legacy session, _meta.protocolVersion -> stateless

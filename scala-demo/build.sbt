@@ -1,9 +1,9 @@
-scalaVersion := "3.9.0"
+scalaVersion := "3.10.0"
 
 name := "mcp2-scala-demo"
 
 libraryDependencies ++= Seq(
-  "com.jamesward" %% "zio-http-mcp" % "0.8.3",
+  "com.jamesward" %% "zio-http-mcp" % "0.9.0",
   "org.slf4j" % "slf4j-simple" % "2.0.20",
 
   // Skills over MCP: a SkillsJar from Maven Central, served straight off the classpath

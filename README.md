@@ -18,6 +18,8 @@ Slides and demos for the MCP `2026-07-28` spec.
 
 ## Slides
 
+Published on every push to `main` that touches `preso/`: https://jamesward.github.io/mcp2/ ([PDF](https://jamesward.github.io/mcp2/mcp2.pdf))
+
 ```bash
 cd preso
 npm install
